@@ -49,14 +49,10 @@
 
   <dependencies>
     <dependency>
-      <groupId>org.yaml</groupId>
-      <artifactId>snakeyaml</artifactId>
-      <version>1.13</version>
-    </dependency>
-    <dependency>
-      <groupId>commons-logging</groupId>
-      <artifactId>commons-logging</artifactId>
-      <version>1.1.2</version>
+      <groupId>co.paralleluniverse</groupId>
+      <artifactId>quasar-core</artifactId>
+      <version>0.6.2</version>
+      <classifier>jdk8</classifier>
     </dependency>
     <dependency>
       <groupId>org.projectlombok</groupId>
@@ -74,6 +70,23 @@
 
   <build>
     <plugins>
+      <plugin>
+        <groupId>com.vlkan</groupId>
+        <artifactId>quasar-maven-plugin</artifactId>
+        <version>0.6.2</version>
+        <configuration>
+          <check>true</check>
+          <debug>true</debug>
+          <verbose>true</verbose>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>instrument</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
       <plugin>
         <groupId>org.sonatype.plugins</groupId>
         <artifactId>nexus-staging-maven-plugin</artifactId>
