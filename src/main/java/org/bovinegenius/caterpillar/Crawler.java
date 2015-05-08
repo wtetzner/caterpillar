@@ -1,6 +1,5 @@
 package org.bovinegenius.caterpillar;
 
-import static org.bovinegenius.caterpillar.util.Collect.list;
 import static org.bovinegenius.caterpillar.util.Pair.pair;
 import static org.bovinegenius.caterpillar.util.UriUtils.uri;
 
@@ -11,10 +10,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
-
-import javax.ws.rs.core.Response;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -22,30 +21,26 @@ import lombok.Value;
 
 import org.bovinegenius.caterpillar.UrlProcessor.UrlAction;
 
-import co.paralleluniverse.fibers.SuspendExecution;
-
 public class Crawler {
-    @Getter private final Set<Host> hosts;
     @Getter private final List<UrlProcessor> processors;
     private final List<URI> seedUrls;
     private final UrlCollection collection;
 
-    private Crawler(Set<Host> hosts, Stream<URI> seedUrls, UrlAction action, int processorsPerHost) throws SuspendExecution {
-        this.hosts = hosts;
-        UrlMap<Response> urlMap = UrlMap.of();
-
-        this.collection = UrlCollection.of(urlMap);
+    private Crawler(Map<String,Long> hostDelays, Stream<URI> seedUrls, UrlAction action, int processorsPerHost) {
+        Set<Host> hosts = hostsToSet(hostDelays);
+        Map<URI,Boolean> seen = new ConcurrentHashMap<URI, Boolean>();
+        this.collection = UrlCollection.of(hosts,seen);
         this.processors = hosts.stream()
-                .flatMap(h -> processors(this.collection, processorsPerHost, h.getHostname(), h.getAccessDelay(), action))
+                .flatMap(h -> processors(this.collection, processorsPerHost, action))
                 .collect(Collectors.toList());
         this.seedUrls = seedUrls.collect(Collectors.toList());
     }
 
-    private static Stream<UrlProcessor> processors(UrlCollection collection, int num, String host, long accessDelay, UrlAction action) {
-        return list(1, 2, 3).stream().map(index -> collection.newProcessor(host, accessDelay, action));
+    private static Stream<UrlProcessor> processors(UrlCollection collection, int num, UrlAction action) {
+        return IntStream.range(0, num).mapToObj(index -> collection.newProcessor(action));
     }
 
-    private static Set<Host> hostsToSet(Stream<Host> hosts) {
+    private static Map<String,Long> hostsToMap(Stream<Host> hosts) {
         Map<String,List<Long>> hostsMap = new HashMap<>();
         hosts.forEach(h -> hostsMap.computeIfAbsent(h.getHostname(), k -> new ArrayList<Long>()).add(h.getAccessDelay()));
         List<Map.Entry<String, List<Long>>> duplicates = hostsMap.entrySet().stream()
@@ -55,11 +50,17 @@ public class Crawler {
         if (!duplicates.isEmpty()) {
             throw new RuntimeException(String.format("Duplicate entries found for hosts: %s", duplicates));
         }
-        return Collections.unmodifiableSet(
-                hostsMap.entrySet().stream().map(e -> Host.of(e.getKey(), e.getValue().get(0))).collect(Collectors.toSet()));
+        Map<String,Long> hostDelays = new HashMap<>();
+        hostsMap.entrySet().stream().forEach(e -> hostDelays.put(e.getKey(), e.getValue().get(0)));
+        return Collections.unmodifiableMap(hostDelays);
     }
 
-    public void run() throws SuspendExecution {
+    private static Set<Host> hostsToSet(Map<String,Long> hostDelays) {
+        return Collections.unmodifiableSet(
+                hostDelays.entrySet().stream().map(e -> Host.of(e.getKey(), e.getValue())).collect(Collectors.toSet()));
+    }
+
+    public void run() {
         for (URI url : seedUrls) {
             collection.add(url);
         }
@@ -67,14 +68,15 @@ public class Crawler {
         this.processors.forEach(p -> p.join());
     }
 
-    public static Crawler of(Stream<Host> hosts, Stream<URI> seedUrls, UrlAction action, int processorsPerHost) throws SuspendExecution {
-        return new Crawler(hostsToSet(hosts), seedUrls, action, processorsPerHost);
+    public static Crawler of(Stream<Host> hosts, Stream<URI> seedUrls, UrlAction action, int processorsPerHost) {
+        return new Crawler(hostsToMap(hosts), seedUrls, action, processorsPerHost);
     }
 
-    public static Crawler of(Stream<Host> hosts, UrlAction action, int processorsPerHost) throws SuspendExecution {
-        Set<Host> hostSet = hostsToSet(hosts);
+    public static Crawler of(Stream<Host> hosts, UrlAction action, int processorsPerHost) {
+        Map<String,Long> hostDelays = hostsToMap(hosts);
+        Set<Host> hostSet = hostsToSet(hostDelays);
         Stream<URI> seedUrls = hostSet.stream().map(h -> uri(String.format("http://%s/", h.getHostname())));
-        return new Crawler(hostSet, seedUrls, action, processorsPerHost);
+        return new Crawler(hostDelays, seedUrls, action, processorsPerHost);
     }
 
     @Value

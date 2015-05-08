@@ -1,63 +1,50 @@
 package org.bovinegenius.caterpillar;
 
-import static org.bovinegenius.caterpillar.util.Pair.pair;
 import static org.bovinegenius.caterpillar.util.UriUtils.uri;
 
 import java.net.URI;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
+import java.util.Map;
+import java.util.concurrent.DelayQueue;
 import java.util.stream.Collectors;
 
 import javax.ws.rs.client.Client;
+import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 import lombok.Getter;
 
-import org.bovinegenius.caterpillar.UrlMap.UrlMapResult;
 import org.glassfish.jersey.client.ClientProperties;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 
-import co.paralleluniverse.fibers.Fiber;
-import co.paralleluniverse.fibers.SuspendExecution;
-import co.paralleluniverse.fibers.Suspendable;
-import co.paralleluniverse.fibers.ws.rs.client.AsyncClientBuilder;
-import co.paralleluniverse.strands.channels.Channel;
-
 public class UrlProcessor {
-    private final Fiber<Boolean> fiber;
+    private final Thread thread;
     @Getter private final UrlAction action;
-    @Getter private final long accessDelay;
 
-    UrlProcessor(long accessDelay, final UrlMap<Response> urlMap, final UrlSink sink, final Channel<URI> channel, UrlAction action) {
-        this.accessDelay = accessDelay;
+    UrlProcessor(final String name, final UrlSink sink, final DelayQueue<DelayedUrl> channel, final Map<URI,Boolean> seen, UrlAction action, KnownHosts knownHosts) {
         this.action = action;
-        this.fiber = new Fiber<>(() -> {
-            for (URI url; (url = channel.receive()) != null;) {
-                process(url, urlMap, sink, action, accessDelay);
+        this.thread = new Thread(() -> {
+            try {
+                for (URI url; (url = channel.take().getUrl()) != null;) {
+                    process(url, sink, action, seen, knownHosts, name);
+                }
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e.getMessage(), e);
             }
-            return true;
         });
     }
 
-    @Suspendable
-    private static void process(URI uri, UrlMap<Response> urlMap, UrlSink sink, UrlAction action, long delay) throws SuspendExecution {
-        UrlMapResult<Response> result = urlMap.getLinks(uri, url -> {
-            Response response = lookup(url);
-            List<URI> links = extractUrls(response).stream().map(link -> url.resolve(link)).distinct().collect(Collectors.toList());
-            return pair(response, links);
-        });
-        if (!result.isKnown()) {
-            Response response = result.getData().get();
-            List<URI> links = result.getLinks();
-            List<URI> cleanedLinks = links.stream().filter(l -> l.getHost().equalsIgnoreCase(uri.getHost())).collect(Collectors.toList());
-            for (URI link : cleanedLinks) {
-                sink.add(link);
-            }
-            action.apply(uri, response);
+    private static void process(URI uri, UrlSink sink, UrlAction action, Map<URI,Boolean> seen, KnownHosts knownHosts, String processorName) {
+        Response response = lookup(uri);
+        List<URI> links = extractUrls(response).stream().map(link -> uri.resolve(link)).distinct().collect(Collectors.toList());
+        List<URI> cleanedLinks = links.stream().filter(l -> knownHosts.isKnown(l.getHost())).collect(Collectors.toList());
+        for (URI link : cleanedLinks) {
+            sink.add(link);
         }
+        action.apply(processorName, uri, response);
     }
 
     private static String trimFragment(String url) {
@@ -84,10 +71,12 @@ public class UrlProcessor {
         }
     }
 
-    @Suspendable
+    @Getter(lazy=true) private final static Client client = ClientBuilder.newClient();
+    
     private static Response lookup(URI url) {
-        Client client = AsyncClientBuilder.newClient();
+        Client client = getClient();
         Response response = client.target(url)
+                .property(ClientProperties.ASYNC_THREADPOOL_SIZE, 50)
                 .property(ClientProperties.FOLLOW_REDIRECTS, Boolean.TRUE)
                 .request(MediaType.WILDCARD)
                 .get();
@@ -96,20 +85,19 @@ public class UrlProcessor {
     }
 
     public UrlProcessor start() {
-        this.fiber.start();
+        this.thread.start();
         return this;
     }
 
     void join() {
         try {
-            //this.fiber.joinNoSuspend();
-            this.fiber.join();
-        } catch (ExecutionException | InterruptedException e) {
+            this.thread.join();
+        } catch (InterruptedException e) {
             throw new RuntimeException(e.getMessage(), e);
         }
     }
 
     public static interface UrlAction {
-        public void apply(URI uri, Response response) throws SuspendExecution;
+        public void apply(String processorName, URI uri, Response response);
     }
 }

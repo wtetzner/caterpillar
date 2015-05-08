@@ -2,87 +2,42 @@ package org.bovinegenius.caterpillar;
 
 import java.net.URI;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Delayed;
-import java.util.concurrent.TimeUnit;
+import java.util.Set;
+import java.util.concurrent.DelayQueue;
 
-import javax.ws.rs.core.Response;
-
-import lombok.RequiredArgsConstructor;
-import lombok.Value;
-
+import org.bovinegenius.caterpillar.Crawler.Host;
 import org.bovinegenius.caterpillar.UrlProcessor.UrlAction;
 
-import co.paralleluniverse.fibers.SuspendExecution;
-import co.paralleluniverse.strands.channels.Channel;
-import co.paralleluniverse.strands.channels.Channels;
-import co.paralleluniverse.strands.channels.Channels.OverflowPolicy;
-
 public class UrlCollection implements UrlSink {
-    private final Map<String,Channel<URI>> urls;
-    private final UrlMap<Response> urlMap;
+    private final IdSequence ids;
+    private final DelayQueue<DelayedUrl> urls;
+    private final HostDelays hostDelays;
+    private final Map<URI,Boolean> seen;
 
-    private UrlCollection(UrlMap<Response> urlMap) {
-        Map<String,Channel<URI>> urls = new ConcurrentHashMap<>();
-        this.urls = urls;
-        this.urlMap = urlMap;
+    private UrlCollection(Set<Host> hosts, Map<URI,Boolean> seen) {
+        this.ids = new IdSequence();
+        this.urls = new DelayQueue<>();
+        this.seen = seen;
+        this.hostDelays = HostDelays.of(hosts);
     }
 
-    private static void add(Map<String,Channel<URI>> urls, URI url) throws SuspendExecution {
-        Channel<URI> queue = urls.get(url.getHost()); //.computeIfAbsent(url.getHost(), host -> new LinkedBlockingQueue<URI>());
-        if (queue == null) {
-            throw new RuntimeException(String.format("Unknown host %s in URL %s", url.getHost(), url));
-        }
-        try {
-            queue.send(url);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e.getMessage(), e);
-        }
+    private static void add(DelayQueue<DelayedUrl> urls, URI url, HostDelays hostDelays, Map<URI,Boolean> seen) {
+        seen.computeIfAbsent(url, l -> {
+            urls.add(hostDelays.delayedUrl(l));
+            return true;
+        });
     }
 
     @Override
-    public void add(URI url) throws SuspendExecution {
-        add(this.urls, url);
+    public void add(URI url) {
+        add(this.urls, url, this.hostDelays, this.seen);
     }
 
-    public UrlProcessor newProcessor(String host, long accessDelay, UrlAction action) {
-        Channel<URI> channel = getStreamForHost(host);
-        return new UrlProcessor(accessDelay, this.urlMap, this, channel, action);
+    public UrlProcessor newProcessor(UrlAction action) {
+        return new UrlProcessor(this.ids.next().toString(), this, this.urls, this.seen, action, this.hostDelays);
     }
 
-    private Channel<URI> getStreamForHost(String host) {
-        return urls.computeIfAbsent(host, h -> Channels.newChannel(100000, OverflowPolicy.BLOCK, false, false));
-    }
-
-    public static UrlCollection of(UrlMap<Response> urlMap) {
-        return new UrlCollection(urlMap);
-    }
-
-    @Value
-    @RequiredArgsConstructor(staticName="of")
-    public static class DelayedUrl implements Delayed {
-        long delay;
-        URI url;
-
-        @Override
-        public long getDelay(TimeUnit unit) {
-            return unit.convert(delay, TimeUnit.MILLISECONDS);
-        }
-
-        @Override
-        public int compareTo(Delayed o) {
-            if (o == null) {
-                return 1;
-            } else {
-                long otherMillis = o.getDelay(TimeUnit.MILLISECONDS);
-                if (delay < otherMillis) {
-                    return -1;
-                } else if (delay == otherMillis) {
-                    return 0;
-                } else {
-                    return 1;
-                }
-            }
-        }
+    public static UrlCollection of(Set<Host> hosts, Map<URI,Boolean> seen) {
+        return new UrlCollection(hosts, seen);
     }
 }

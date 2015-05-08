@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class Collect {
-    @SuppressWarnings("unchecked")
+    @SafeVarargs
     public static <T> List<T> list(final T... ts) {
         return Collections.unmodifiableList(Arrays.stream(ts).collect(Collectors.toList()));
     }
