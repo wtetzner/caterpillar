@@ -5,7 +5,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.DelayQueue;
 
-import org.bovinegenius.caterpillar.Crawler.Host;
 import org.bovinegenius.caterpillar.UrlProcessor.UrlAction;
 
 public class UrlCollection implements UrlSink {

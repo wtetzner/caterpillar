@@ -1,6 +1,7 @@
 package org.bovinegenius.caterpillar;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.TimeUnit;
 
@@ -10,12 +11,12 @@ import lombok.Value;
 @Value
 @RequiredArgsConstructor(staticName="of")
 public class DelayedUrl implements Delayed {
-    long endTime;
+    Instant endTime;
     URI url;
 
     private long getDiff() {
-        long currentTime = System.currentTimeMillis();
-        return endTime - currentTime;
+        long currentTime = Instant.now().toEpochMilli();
+        return endTime.toEpochMilli() - currentTime;
     }
 
     @Override
@@ -28,7 +29,7 @@ public class DelayedUrl implements Delayed {
         if (o == null) {
             return 1;
         } else {
-            long delay = getDiff();
+            long delay = getDelay(TimeUnit.MILLISECONDS);
             long otherMillis = o.getDelay(TimeUnit.MILLISECONDS);
             if (delay < otherMillis) {
                 return -1;
@@ -38,5 +39,10 @@ public class DelayedUrl implements Delayed {
                 return 1;
             }
         }
+    }
+    
+    @Override
+    public String toString() {
+        return String.format("%s@%s", this.url, this.endTime);
     }
 }

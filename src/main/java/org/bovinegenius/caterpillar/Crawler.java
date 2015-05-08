@@ -1,7 +1,6 @@
 package org.bovinegenius.caterpillar;
 
 import static org.bovinegenius.caterpillar.util.Pair.pair;
-import static org.bovinegenius.caterpillar.util.UriUtils.uri;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -16,18 +15,16 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
-import lombok.Value;
 
 import org.bovinegenius.caterpillar.UrlProcessor.UrlAction;
+import org.bovinegenius.caterpillar.util.UriUtils;
 
 public class Crawler {
     @Getter private final List<UrlProcessor> processors;
     private final List<URI> seedUrls;
     private final UrlCollection collection;
 
-    private Crawler(Map<String,Long> hostDelays, Stream<URI> seedUrls, UrlAction action, int processorsPerHost) {
-        Set<Host> hosts = hostsToSet(hostDelays);
+    private Crawler(Map<String,Long> hostDelays, Set<Host> hosts, Stream<URI> seedUrls, UrlAction action, int processorsPerHost) {
         Map<URI,Boolean> seen = new ConcurrentHashMap<URI, Boolean>();
         this.collection = UrlCollection.of(hosts,seen);
         this.processors = hosts.stream()
@@ -55,11 +52,6 @@ public class Crawler {
         return Collections.unmodifiableMap(hostDelays);
     }
 
-    private static Set<Host> hostsToSet(Map<String,Long> hostDelays) {
-        return Collections.unmodifiableSet(
-                hostDelays.entrySet().stream().map(e -> Host.of(e.getKey(), e.getValue())).collect(Collectors.toSet()));
-    }
-
     public void run() {
         for (URI url : seedUrls) {
             collection.add(url);
@@ -69,20 +61,17 @@ public class Crawler {
     }
 
     public static Crawler of(Stream<Host> hosts, Stream<URI> seedUrls, UrlAction action, int processorsPerHost) {
-        return new Crawler(hostsToMap(hosts), seedUrls, action, processorsPerHost);
+        return new Crawler(hostsToMap(hosts), hosts.collect(Collectors.toSet()), seedUrls, action, processorsPerHost);
+    }
+
+    private static Stream<URI> seedUrls(Host host) {
+        return host.getInitialPaths().stream().map(h -> UriUtils.uri(String.format("http://%s/", host.getHostname())).resolve(h));
     }
 
     public static Crawler of(Stream<Host> hosts, UrlAction action, int processorsPerHost) {
         Map<String,Long> hostDelays = hostsToMap(hosts);
-        Set<Host> hostSet = hostsToSet(hostDelays);
-        Stream<URI> seedUrls = hostSet.stream().map(h -> uri(String.format("http://%s/", h.getHostname())));
-        return new Crawler(hostDelays, seedUrls, action, processorsPerHost);
-    }
-
-    @Value
-    @RequiredArgsConstructor(staticName="of")
-    public static class Host {
-        String hostname;
-        long accessDelay;
+        Set<Host> hostSet = hosts.collect(Collectors.toSet());
+        Stream<URI> seedUrls = hostSet.stream().flatMap(Crawler::seedUrls);
+        return new Crawler(hostDelays, hostSet, seedUrls, action, processorsPerHost);
     }
 }

@@ -17,7 +17,8 @@ public class HostDelay {
     }
 
     public DelayedUrl delayedUrl(URI url) {
-        return DelayedUrl.of(this.delaySequence.next().toEpochMilli(), url);
+        DelayedUrl delayedUrl = DelayedUrl.of(this.delaySequence.next(), url);
+        return delayedUrl;
     }
 
     public static HostDelay of(String hostname, long delay) {

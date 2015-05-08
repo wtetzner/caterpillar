@@ -3,6 +3,7 @@ package org.bovinegenius.caterpillar;
 import static org.bovinegenius.caterpillar.util.UriUtils.uri;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +29,9 @@ public class UrlProcessor {
         this.action = action;
         this.thread = new Thread(() -> {
             try {
-                for (URI url; (url = channel.take().getUrl()) != null;) {
+                for (DelayedUrl delayedUrl; (delayedUrl = channel.take()) != null;) {
+                    URI url = delayedUrl.getUrl();
+                    System.out.println(String.format("(%s) Fetching %s", Instant.now(), delayedUrl));
                     process(url, sink, action, seen, knownHosts, name);
                 }
             } catch (InterruptedException e) {
@@ -76,7 +79,6 @@ public class UrlProcessor {
     private static Response lookup(URI url) {
         Client client = getClient();
         Response response = client.target(url)
-                .property(ClientProperties.ASYNC_THREADPOOL_SIZE, 50)
                 .property(ClientProperties.FOLLOW_REDIRECTS, Boolean.TRUE)
                 .request(MediaType.WILDCARD)
                 .get();

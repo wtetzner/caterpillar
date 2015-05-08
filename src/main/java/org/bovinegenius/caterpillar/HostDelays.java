@@ -5,8 +5,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.bovinegenius.caterpillar.Crawler.Host;
-
 public class HostDelays implements KnownHosts {
     private final Map<String,HostDelay> delays;
 
